@@ -152,78 +152,97 @@ app.post('/upload', upload.single('photo'), (req, res) => {
 
 // Registrar entrada
 app.post('/register-entry', (req, res) => {
-    const { usuarioId, empresaId, ubicacion, resultado_autenticacion, foto_intento } = req.body;
-    const imageBuffer = foto_intento ? Buffer.from(foto_intento.split(',')[1], 'base64') : null;
+    const { usuarioId, empresaId, resultado_autenticacion, foto_intento } = req.body;
+    const imageBuffer = foto_intento
+        ? Buffer.from(foto_intento.split(',')[1], 'base64')
+        : null;
 
-    const q = `
-        INSERT INTO registro (usuario_id, empresa_id, hora_entrada, ubicacion, resultado_autenticacion, foto_intento)
+    // 1) Primero obtenemos la zona/área del usuario
+    db.query(
+        `SELECT a.nombre AS zona
+       FROM areas a
+       JOIN tabla_usuarios u ON u.area_id = a.id
+      WHERE u.id = ?`,
+        [usuarioId],
+        (err, zonaRows) => {
+            if (err) return res.status(500).send('Error al obtener la zona');
+
+            const ubicacion = zonaRows[0]?.zona || 'Sin zona';
+
+            // 2) Insert con SELECT ... WHERE NOT EXISTS y devolviendo 409 si ya existe
+            const q = `
+        INSERT INTO registro
+          (usuario_id, empresa_id, hora_entrada, ubicacion, resultado_autenticacion, foto_intento)
         SELECT ?, ?, NOW(), ?, ?, ?
         FROM DUAL
         WHERE NOT EXISTS (
-            SELECT 1 FROM registro WHERE usuario_id = ? AND empresa_id = ? AND DATE(hora_entrada) = CURDATE()
+          SELECT 1
+            FROM registro
+           WHERE usuario_id = ?
+             AND empresa_id = ?
+             AND DATE(hora_entrada) = CURDATE()
         )
-    `;
-    const params = [usuarioId, empresaId, ubicacion, resultado_autenticacion, imageBuffer, usuarioId, empresaId];
-    db.query(q, params, (err, results) => {
-        if (err) return res.status(500).send("Error al registrar la entrada");
-        if (results.affectedRows === 0) {
-            console.log("Entrada ya registrada previamente.");
-            return res.status(200).send("Entrada ya registrada previamente."); // ✔ OK
-        }
-        res.send("Entrada registrada exitosamente");
+      `;
+            const params = [
+                usuarioId, empresaId, ubicacion, resultado_autenticacion, imageBuffer,
+                usuarioId, empresaId
+            ];
 
-    });
+            db.query(q, params, (err, result) => {
+                if (err) {
+                    console.error('Error al registrar la entrada:', err);
+                    return res.status(500).send('Error al registrar la entrada');
+                }
+                if (result.affectedRows === 0) {
+                    // Ya había una entrada hoy
+                    return res.status(409).send('Ya hay una entrada registrada para hoy');
+                }
+                res.send('Entrada registrada exitosamente');
+            });
+        }
+    );
 });
 
 // Registrar salida
 app.post('/register-exit', (req, res) => {
     const { usuarioId, empresaId } = req.body;
-    const q = `
-        UPDATE registro SET hora_salida = NOW()
-        WHERE usuario_id = ? AND empresa_id = ? AND DATE(hora_entrada) = CURDATE() AND hora_salida IS NULL
+
+    // 1) Verificamos primero que exista una entrada hoy
+    const checkEntry = `
+        SELECT COUNT(*) AS cnt
+        FROM registro
+        WHERE usuario_id = ?
+          AND empresa_id = ?
+          AND DATE(hora_entrada) = CURDATE()
     `;
-    db.query(q, [usuarioId, empresaId], (err, results) => {
-        if (err) return res.status(500).send("Error al registrar la salida");
-        if (results.affectedRows === 0) return res.status(409).send("No se encontró una entrada válida");
-        res.send("Salida registrada exitosamente");
-    });
-});
+    db.query(checkEntry, [usuarioId, empresaId], (err, rows) => {
+        if (err) {
+            console.error('Error al verificar la entrada:', err);
+            return res.status(500).send('Error al verificar la entrada');
+        }
+        if (rows[0].cnt === 0) {
+            return res.status(409).send('No hay entrada para hoy');
+        }
 
-// Registrar intento fallido
-// Registrar intento fallido (previene correos duplicados en 5 min)
-app.post('/register-failed-attempt', (req, res) => {
-    const { cedula, nombre, empresaId, motivo, fotoIntento } = req.body;
-    const imageBuffer = fotoIntento ? Buffer.from(fotoIntento.split(',')[1], 'base64') : null;
-
-    const verificarIntentoReciente = `
-        SELECT id FROM intentos_fallidos 
-        WHERE cedula = ? AND empresa_id = ? 
-        AND fecha > NOW() - INTERVAL 5 MINUTE
-        LIMIT 1
+        // 2) Intentamos actualizar hora_salida solo si estaba NULL
+        const q = `
+      UPDATE registro
+         SET hora_salida = NOW()
+       WHERE usuario_id = ?
+         AND empresa_id = ?
+         AND DATE(hora_entrada) = CURDATE()
+         AND hora_salida IS NULL
     `;
-
-    db.query(verificarIntentoReciente, [cedula, empresaId], (err, rows) => {
-        if (err) return res.status(500).send('Error al verificar intentos recientes');
-
-        const seDebeEnviarCorreo = rows.length === 0;
-
-        const insertarIntento = `
-            INSERT INTO intentos_fallidos (cedula, nombre, empresa_id, fecha, motivo, foto_intento)
-            VALUES (?, ?, ?, NOW(), ?, ?)
-        `;
-
-        db.query(insertarIntento, [cedula, nombre, empresaId, motivo, imageBuffer], async (err) => {
-            if (err) return res.status(500).send('Error al registrar intento fallido');
-
-            if (seDebeEnviarCorreo) {
-                await sendSecurityAlert(
-                    'Intento fallido',
-                    `Nombre: ${nombre || 'Desconocido'}\nCédula: ${cedula || 'No disponible'}\nMotivo: ${motivo}`,
-                    fotoIntento ? fotoIntento.split(',')[1] : null
-                );
+        db.query(q, [usuarioId, empresaId], (err, result) => {
+            if (err) {
+                console.error('Error al registrar la salida:', err);
+                return res.status(500).send('Error al registrar la salida');
             }
-
-            res.status(201).send('Intento fallido registrado.');
+            if (result.affectedRows === 0) {
+                // No se actualizó porque ya había una salida
+                return res.status(409).send('Ya hay una salida registrada para hoy');
+            }
+            res.send('Salida registrada exitosamente');
         });
     });
 });

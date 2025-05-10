@@ -323,99 +323,85 @@ function showCustomAlert(message) {
     }, 4000);
 }
 
-// Función para registrar la entrada
-async function registerEntry(userId, photoBase64) {
-    const localDate = new Date(); // Hora local del cliente
-    const ubicacion = "Zona común"; // Puedes cambiar aquí tu ubicación
-    const resultado_autenticacion = "Exitosa"; // Siempre será exitosa si llegó aquí
+    async function registerEntry(userId, photoBase64) {
+        const localDate = new Date(); // Hora local del cliente
+        const resultado_autenticacion = "Exitosa"; // Tu lógica
+        const ubicacion = "Zona común";           // Se ignora porque ahora el servidor lee la zona real
 
-    try {
-        const response = await fetch('/register-entry', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                usuarioId: userId,
-                empresaId: selectedEmpresaId,
-                hora_entrada: localDate.toISOString(), // Mandamos la hora
-                ubicacion: ubicacion, // Mandamos ubicación
-                resultado_autenticacion: resultado_autenticacion, // Mandamos resultado
-                foto_intento: photoBase64 // Mandamos foto
-            })
-        });
+        try {
+            const response = await fetch('/register-entry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    usuarioId: userId,
+                    empresaId: selectedEmpresaId,
+                    resultado_autenticacion,
+                    foto_intento: photoBase64
+                })
+            });
 
-        if (response.ok) {
-            notifyUser('Entrada registrada exitosamente.');
-            showCustomAlert('Entrada registrada exitosamente.');
-            return true;
-        } else if (response.status === 409) {
-            // No mostramos mensaje para evitar confusión
-            console.warn('Intento de doble entrada ignorado.');
-        } else {
-            notifyUser('Error al registrar la entrada.', true);
-        }
-    } catch (error) {
-        console.error('Error de red al registrar la entrada:', error);
-        notifyUser('Error al conectar con el servidor.', true);
-    }
-
-    return false;
-}
-
-
-
-
-// Función para registrar la salida
-async function registerExit(userId) {
-    const localDate = new Date(); // Hora local del cliente
-    try {
-        // Verificar si ya hay una salida registrada para hoy
-        const checkResponse = await fetch(`/check-exit?usuarioId=${userId}&empresaId=${selectedEmpresaId}`);
-        if (checkResponse.ok) {
-            const result = await checkResponse.json();
-            if (result.exitExists) {
-                notifyUser('Ya se ha registrado una salida para este usuario hoy.');
+            // Si ya había una entrada hoy, respondemos con el mensaje que venga del servidor
+            if (response.status === 409) {
+                const msg = await response.text();
+                notifyUser(msg, true);
                 return false;
             }
-        }
 
-        // Verificar si hay una entrada registrada para poder registrar la salida
-        const checkEntryResponse = await fetch(`/check-entry?usuarioId=${userId}&empresaId=${selectedEmpresaId}`);
-        if (checkEntryResponse.ok) {
-            const entryResult = await checkEntryResponse.json();
-            if (!entryResult.entryExists) {
-                notifyUser('No hay entrada registrada para este usuario hoy.', true);
-                return false; // Detener el proceso para evitar errores
+            if (!response.ok) {
+                notifyUser('Error al registrar la entrada.', true);
+                return false;
             }
-        }
 
-        const response = await fetch('/register-exit', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                usuarioId: userId,
-                empresaId: selectedEmpresaId,
-                hora_salida: localDate.toISOString() // Enviar la hora local en formato ISO
-            })
-        });
-        if (response.ok) {
-            notifyUser('Salida registrada exitosamente.');
-            showCustomAlert('Salida registrada exitosamente.'); // Mostrar el alert personalizado
+            // OK
+            notifyUser('✅ Entrada registrada exitosamente.');
+            showCustomAlert('✅ Entrada registrada exitosamente.');
             return true;
-        } else if (response.status === 409) {
-            notifyUser('No se encontró una entrada válida para hoy.', true);
-        } else {
-            notifyUser('Error al registrar la salida.', true);
+
+        } catch (error) {
+            console.error('Error de red al registrar la entrada:', error);
+            notifyUser('Error al conectar con el servidor.', true);
+            return false;
         }
-    } catch (error) {
-        console.error('Error de red al registrar la salida:', error);
-        notifyUser('Error al conectar con el servidor.', true);
     }
-    return false;
-}
+
+
+
+
+    async function registerExit(userId) {
+        const localDate = new Date(); // Hora local del cliente
+        try {
+            const response = await fetch('/register-exit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    usuarioId: userId,
+                    empresaId: selectedEmpresaId
+                })
+            });
+
+            // Si no había entrada o ya hay salida, respondemos con el mensaje del servidor
+            if (response.status === 409) {
+                const msg = await response.text();
+                notifyUser(msg, true);
+                return false;
+            }
+
+            if (!response.ok) {
+                notifyUser('Error al registrar la salida.', true);
+                return false;
+            }
+
+            // OK
+            notifyUser('✅ Salida registrada exitosamente.');
+            showCustomAlert('✅ Salida registrada exitosamente.');
+            return true;
+
+        } catch (error) {
+            console.error('Error de red al registrar la salida:', error);
+            notifyUser('Error al conectar con el servidor.', true);
+            return false;
+        }
+    }
 
 
 
