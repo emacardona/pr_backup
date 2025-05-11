@@ -152,122 +152,161 @@ app.post('/upload', upload.single('photo'), (req, res) => {
 
 // Registrar entrada
 app.post('/register-entry', (req, res) => {
-    const { usuarioId, empresaId, resultado_autenticacion, foto_intento } = req.body;
+    // 1) Desempaquetamos los datos de la petición
+    const {
+        usuarioId,
+        empresaId,
+        deviceCode,
+        resultado_autenticacion,
+        foto_intento
+    } = req.body;
+    console.log('▶ /register-entry recibida:', { usuarioId, empresaId, deviceCode });
+
+    // Preparamos el buffer de la imagen
     const imageBuffer = foto_intento
         ? Buffer.from(foto_intento.split(',')[1], 'base64')
         : null;
 
-    // 1) Primero obtenemos la zona/área del usuario
-    db.query(
-        `SELECT a.nombre AS zona
-       FROM areas a
-       JOIN tabla_usuarios u ON u.area_id = a.id
-      WHERE u.id = ?`,
-        [usuarioId],
-        (err, zonaRows) => {
-            if (err) return res.status(500).send('Error al obtener la zona');
-
-            const ubicacion = zonaRows[0]?.zona || 'Sin zona';
-
-            // 2) Insert con SELECT ... WHERE NOT EXISTS y devolviendo 409 si ya existe
-            const q = `
-        INSERT INTO registro
-          (usuario_id, empresa_id, hora_entrada, ubicacion, resultado_autenticacion, foto_intento)
-        SELECT ?, ?, NOW(), ?, ?, ?
-        FROM DUAL
-        WHERE NOT EXISTS (
-          SELECT 1
-            FROM registro
-           WHERE usuario_id = ?
-             AND empresa_id = ?
-             AND DATE(hora_entrada) = CURDATE()
-        )
-      `;
-            const params = [
-                usuarioId, empresaId, ubicacion, resultado_autenticacion, imageBuffer,
-                usuarioId, empresaId
-            ];
-
-            db.query(q, params, (err, result) => {
-                if (err) {
-                    console.error('Error al registrar la entrada:', err);
-                    return res.status(500).send('Error al registrar la entrada');
-                }
-                if (result.affectedRows === 0) {
-                    // Ya había una entrada hoy
-                    return res.status(409).send('Ya hay una entrada registrada para hoy');
-                }
-                res.send('Entrada registrada exitosamente');
-            });
-        }
-    );
-});
-
-app.post('/register-failed-attempt', (req, res) => {
-    const { nombre, empresaId, motivo, fotoIntento } = req.body;
-    const imageBuffer = fotoIntento
-        ? Buffer.from(fotoIntento.split(',')[1], 'base64')
-        : null;
-
-    console.log('⚠️ Intento fallido recibido:', { nombre, empresaId, motivo });
-
-    const insertarIntento = `
-    INSERT INTO intentos_fallidos
-      (nombre, empresa_id, fecha, motivo, foto_intento)
-    VALUES (?, ?, NOW(), ?, ?)
+    // 2) Consulta “por defecto”: usuario.area_id == dispositivo.area_id
+    const checkDefault = `
+    SELECT COUNT(*) AS cnt
+      FROM tabla_usuarios u
+      JOIN dispositivos d ON u.area_id = d.area_id
+     WHERE u.id = ? AND d.device_code = ?
   `;
-    db.query(insertarIntento, [ nombre, empresaId, motivo, imageBuffer ], (err) => {
+    db.query(checkDefault, [usuarioId, deviceCode], (err, defaultRows) => {
         if (err) {
-            console.error('❌ Error al insertar intento fallido:', err);
-            return res.status(500).send('Error al registrar intento fallido');
+            console.error('Error validando permisos:', err);
+            return res.status(500).send('Error validando permisos');
         }
-        console.log('✅ Intento fallido registrado.');
-        res.status(201).send('Intento fallido registrado.');
+        console.log('checkDefault result:', defaultRows[0].cnt);
+        if (defaultRows[0].cnt > 0) return proceed();
+
+        // 3) Si no entra “por defecto”, chequeo de permisos especiales
+        const checkPerms = `
+      SELECT COUNT(*) AS cnt
+        FROM permisos_acceso p
+        JOIN dispositivos d ON p.area_id = d.area_id
+       WHERE p.usuario_id  = ?
+         AND d.device_code = ?
+         AND p.autorizado  = 1
+         AND p.vencimiento > NOW()
+    `;
+        db.query(checkPerms, [usuarioId, deviceCode], (err, permRows) => {
+            if (err) {
+                console.error('Error validando permisos especiales:', err);
+                return res.status(500).send('Error validando permisos especiales');
+            }
+            console.log('checkPerms result:', permRows[0].cnt);
+            if (permRows[0].cnt > 0) return proceed();
+            // Si tampoco tiene permiso especial:
+            return res.status(403).send('No tiene permiso para ingresar en esta área');
+        });
     });
+
+    // 4) Función interna que solo corre si pasó alguna validación
+    function proceed() {
+        console.log('>>> proceed() llamado para usuario', usuarioId, 'en device', deviceCode);
+        const q = `
+            INSERT INTO registro
+            (usuario_id, empresa_id, hora_entrada, ubicacion, resultado_autenticacion, foto_intento)
+            SELECT ?, ?, NOW(), ?, ?, ?
+            FROM DUAL
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM registro
+                WHERE usuario_id = ?
+                  AND empresa_id = ?
+                  AND DATE(hora_entrada) = CURDATE()
+            )
+        `;
+        const params = [
+            usuarioId, empresaId,
+            /*ubicacion*/ null, resultado_autenticacion, imageBuffer,
+            usuarioId, empresaId
+        ];
+        db.query(q, params, (err, result) => {
+            if (err) {
+                console.error('INSERT registro falló:', err);
+                return res
+                    .status(500)
+                    .send(`Error al registrar la entrada: ${err.message}`);
+            }
+            console.log('INSERT registro OK, affectedRows=', result.affectedRows);
+            if (result.affectedRows === 0) {
+                return res.status(409).send('Ya hay una entrada registrada para hoy');
+            }
+            res.send('Entrada registrada exitosamente');
+        });
+    }
 });
+
 
 // Registrar salida
 app.post('/register-exit', (req, res) => {
-    const { usuarioId, empresaId } = req.body;
+    const { usuarioId, empresaId, deviceCode } = req.body;
 
-    // 1) Verificamos primero que exista una entrada hoy
-    const checkEntry = `
+    // 0) Chequeo de permiso “por defecto”
+    const checkDefault = `
         SELECT COUNT(*) AS cnt
-        FROM registro
-        WHERE usuario_id = ?
-          AND empresa_id = ?
-          AND DATE(hora_entrada) = CURDATE()
+        FROM tabla_usuarios u
+                 JOIN dispositivos d ON u.area_id = d.area_id
+        WHERE u.id = ? AND d.device_code = ?
     `;
-    db.query(checkEntry, [usuarioId, empresaId], (err, rows) => {
-        if (err) {
-            console.error('Error al verificar la entrada:', err);
-            return res.status(500).send('Error al verificar la entrada');
-        }
-        if (rows[0].cnt === 0) {
-            return res.status(409).send('No hay entrada para hoy');
-        }
+    db.query(checkDefault, [usuarioId, deviceCode], (err, defaultRows) => {
+        if (err) return res.status(500).send('Error validando permisos');
+        if (defaultRows[0].cnt > 0) return proceedExit();
 
-        // 2) Intentamos actualizar hora_salida solo si estaba NULL
-        const q = `
-      UPDATE registro
-         SET hora_salida = NOW()
+        // 1) Chequeo de permisos especiales
+        const checkPerms = `
+            SELECT COUNT(*) AS cnt
+            FROM permisos_acceso p
+                     JOIN dispositivos d ON p.area_id = d.area_id
+            WHERE p.usuario_id  = ?
+              AND d.device_code = ?
+              AND p.autorizado  = 1
+              AND p.vencimiento > NOW()
+        `;
+        db.query(checkPerms, [usuarioId, deviceCode], (err, permRows) => {
+            if (err) return res.status(500).send('Error validando permisos especiales');
+            if (permRows[0].cnt > 0) return proceedExit();
+            return res.status(403).send('No tiene permiso para registrar la salida en esta área');
+        });
+    });
+
+    function proceedExit() {
+        // 1) Verificamos primero que exista una entrada hoy
+        const checkEntry = `
+      SELECT COUNT(*) AS cnt
+        FROM registro
        WHERE usuario_id = ?
          AND empresa_id = ?
          AND DATE(hora_entrada) = CURDATE()
-         AND hora_salida IS NULL
     `;
-        db.query(q, [usuarioId, empresaId], (err, result) => {
-            if (err) {
-                console.error('Error al registrar la salida:', err);
-                return res.status(500).send('Error al registrar la salida');
+        db.query(checkEntry, [usuarioId, empresaId], (err, rows) => {
+            if (err) return res.status(500).send('Error al verificar la entrada');
+            if (rows[0].cnt === 0) {
+                return res.status(409).send('No hay entrada para hoy');
             }
-            if (result.affectedRows === 0) {
-                // No se actualizó porque ya había una salida
-                return res.status(409).send('Ya hay una salida registrada para hoy');
-            }
-            res.send('Salida registrada exitosamente');
+
+            // 2) Actualizamos hora_salida si aún no existe
+            const q = `
+        UPDATE registro
+           SET hora_salida = NOW()
+         WHERE usuario_id = ?
+           AND empresa_id = ?
+           AND DATE(hora_entrada) = CURDATE()
+           AND hora_salida IS NULL
+      `;
+            db.query(q, [usuarioId, empresaId], (err, result) => {
+                if (err) return res.status(500).send('Error al registrar la salida');
+                if (result.affectedRows === 0) {
+                    return res.status(409).send('Ya hay una salida registrada para hoy');
+                }
+                res.send('Salida registrada exitosamente');
+            });
         });
-    });
+    }
 });
 
 

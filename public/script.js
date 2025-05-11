@@ -344,6 +344,7 @@ function showCustomAlert(message) {
                 body: JSON.stringify({
                     usuarioId: userId,
                     empresaId: selectedEmpresaId,
+                    deviceCode: DEVICE_CODE,
                     resultado_autenticacion,
                     foto_intento: photoBase64
                 })
@@ -384,7 +385,8 @@ function showCustomAlert(message) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     usuarioId: userId,
-                    empresaId: selectedEmpresaId
+                    empresaId: selectedEmpresaId,
+                    deviceCode: DEVICE_CODE,
                 })
             });
 
