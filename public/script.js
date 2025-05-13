@@ -345,31 +345,31 @@ function showCustomAlert(message) {
                     usuarioId: userId,
                     empresaId: selectedEmpresaId,
                     deviceCode: DEVICE_CODE,
-                    resultado_autenticacion,
+                    resultado_autenticacion: "Exitosa",
                     foto_intento: photoBase64
                 })
             });
+            const text = await response.text();
 
-            // Si ya había una entrada hoy, respondemos con el mensaje que venga del servidor
             if (response.status === 409) {
-                const msg = await response.text();
-                notifyUser(msg, true);
+                notifyUser(text, true);
                 return false;
             }
-
+            if (response.status === 403) {
+                notifyUser(text || 'No tienes permiso para esta área.', true);
+                return false;
+            }
             if (!response.ok) {
-                notifyUser('Error al registrar la entrada.', true);
+                notifyUser(text || 'Error al registrar la entrada.', true);
                 return false;
             }
 
-            // OK
             notifyUser('✅ Entrada registrada exitosamente.');
-            showCustomAlert('✅ Entrada registrada exitosamente.');
             return true;
 
         } catch (error) {
             console.error('Error de red al registrar la entrada:', error);
-            notifyUser('Error al conectar con el servidor.', true);
+            notifyUser('Error de conexión con el servidor.', true);
             return false;
         }
     }
@@ -380,36 +380,45 @@ function showCustomAlert(message) {
     async function registerExit(userId) {
         const localDate = new Date(); // Hora local del cliente
         try {
+            // Llamada al endpoint, pasamos deviceCode igual que en la entrada
             const response = await fetch('/register-exit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     usuarioId: userId,
                     empresaId: selectedEmpresaId,
-                    deviceCode: DEVICE_CODE,
+                    deviceCode: DEVICE_CODE
                 })
             });
 
-            // Si no había entrada o ya hay salida, respondemos con el mensaje del servidor
+            // Leemos siempre el texto que devuelva el servidor
+            const text = await response.text();
+
+            // 409 = no hay entrada hoy o ya existe salida
             if (response.status === 409) {
-                const msg = await response.text();
-                notifyUser(msg, true);
+                notifyUser(text, true);
                 return false;
             }
 
+            // 403 = permiso denegado para registrar salida aquí
+            if (response.status === 403) {
+                notifyUser(text || 'No tienes permiso para registrar la salida en esta área.', true);
+                return false;
+            }
+
+            // Otros errores de servidor
             if (!response.ok) {
-                notifyUser('Error al registrar la salida.', true);
+                notifyUser(text || 'Error al registrar la salida.', true);
                 return false;
             }
 
-            // OK
+            // Si llegamos aquí, fue OK
             notifyUser('✅ Salida registrada exitosamente.');
-            showCustomAlert('✅ Salida registrada exitosamente.');
             return true;
 
         } catch (error) {
             console.error('Error de red al registrar la salida:', error);
-            notifyUser('Error al conectar con el servidor.', true);
+            notifyUser('Error de conexión con el servidor.', true);
             return false;
         }
     }

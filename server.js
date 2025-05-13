@@ -241,6 +241,30 @@ app.post('/register-entry', (req, res) => {
     }
 });
 
+// Registrar intento fallido
+app.post('/register-failed-attempt', (req, res) => {
+    const { nombre, empresaId, motivo, fotoIntento } = req.body;
+    const imageBuffer = fotoIntento
+        ? Buffer.from(fotoIntento.split(',')[1], 'base64')
+        : null;
+
+    console.log('⚠️ Intento fallido recibido:', { nombre, empresaId, motivo });
+
+    const insertarIntento = `
+    INSERT INTO intentos_fallidos
+      (nombre, empresa_id, fecha, motivo, foto_intento)
+    VALUES (?, ?, NOW(), ?, ?)
+  `;
+    db.query(insertarIntento, [ nombre, empresaId, motivo, imageBuffer ], (err) => {
+        if (err) {
+            console.error('❌ Error al insertar intento fallido:', err);
+            return res.status(500).send('Error al registrar intento fallido');
+        }
+        console.log('✅ Intento fallido registrado.');
+        res.status(201).send('Intento fallido registrado.');
+    });
+});
+
 
 // Registrar salida
 app.post('/register-exit', (req, res) => {
