@@ -82,6 +82,11 @@
       text-align: center;
       font-weight: 600;
     }
+    #db-status {
+      margin-bottom: 1rem;
+      text-align: center;
+      font-weight: 600;
+    }
     .hidden {
       display: none;
     }
@@ -90,6 +95,9 @@
 <body>
 
 <div class="container">
+  <!-- Estado de conexión a BD -->
+  <div id="db-status"></div>
+
   <div id="login-section">
     <h2>Iniciar Sesión</h2>
     <form id="login-form">
@@ -108,10 +116,15 @@
     <h2>Gestionar Permiso</h2>
     <form id="permiso-form">
       <label for="usuarioPermiso">Selecciona el Usuario:</label>
-      <select id="usuarioPermiso" name="usuarioId" required></select>
+      <select id="usuarioPermiso" required></select>
 
-      <label for="zona">Zona de acceso:</label>
-      <input type="text" id="zona" name="zona" placeholder="Ej: Zona Bodega" required>
+      <label for="areaId">Selecciona un Área:</label>
+      <select id="areaId" name="areaId" required>
+        <option value="" disabled selected>Selecciona un área</option>
+        <option value="1">Almacén</option>
+        <option value="2">Oficina</option>
+        <option value="3">Bodega</option>
+      </select>
 
       <label for="fechaFin">Fecha de Vencimiento:</label>
       <input type="datetime-local" id="fechaFin" name="fechaFin" required>
@@ -144,11 +157,43 @@
     if (response.ok) {
       loginSection.classList.add('hidden');
       permisoSection.classList.remove('hidden');
+
+      // Validar conexión a BD y tabla permisos_acceso
+      await validarConexion();
+
+      // Cargar datos sólo si la conexión fue exitosa
       cargarUsuarios();
+      cargarAreas();
     } else {
       loginError.textContent = '❌ Usuario o contraseña incorrectos.';
     }
   });
+
+  async function validarConexion() {
+    const statusDiv = document.getElementById('db-status');
+    statusDiv.textContent = 'Comprobando conexión a la base de datos...';
+    statusDiv.style.color = 'black';
+
+    try {
+      const resp = await fetch('/check-permisos-acceso');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const { connected, tableExists } = await resp.json();
+
+      if (connected && tableExists) {
+        statusDiv.textContent = '✅ Conectado y tabla permisos_acceso encontrada';
+        statusDiv.style.color = 'green';
+      } else if (connected) {
+        statusDiv.textContent = '⚠️ Conexión OK, pero tabla permisos_acceso NO existe';
+        statusDiv.style.color = 'orange';
+      } else {
+        statusDiv.textContent = '❌ Conectado con errores';
+        statusDiv.style.color = 'red';
+      }
+    } catch (err) {
+      statusDiv.textContent = `❌ Error al conectar: ${err.message}`;
+      statusDiv.style.color = 'red';
+    }
+  }
 
   async function cargarUsuarios() {
     const select = document.getElementById('usuarioPermiso');
@@ -180,20 +225,49 @@
     }
   }
 
-  document.getElementById('permiso-form').addEventListener('submit', async function (event) {
-    event.preventDefault();
-    const usuarioId = document.getElementById('usuarioPermiso').value;
-    const zona = document.getElementById('zona').value;
-    const fechaFin = document.getElementById('fechaFin').value;
+  async function cargarAreas() {
+    const select = document.getElementById('areaId');
+    select.innerHTML = '<option value="" disabled selected>Selecciona un área</option>';
+    try {
+      const response = await fetch('/get-areas');
+      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      const areas = await response.json();
 
-    const respuesta = await fetch('/autorizar-permiso', {
+      if (areas.length === 0) {
+        const option = document.createElement('option');
+        option.textContent = "No hay áreas registradas.";
+        option.disabled = true;
+        select.appendChild(option);
+        return;
+      }
+
+      areas.forEach(area => {
+        const option = document.createElement('option');
+        option.value = area.id;
+        option.textContent = area.nombre;
+        select.appendChild(option);
+      });
+    } catch (error) {
+      const option = document.createElement('option');
+      option.textContent = `Error: ${error.message}`;
+      select.appendChild(option);
+    }
+  }
+
+  document.getElementById('permiso-form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const usuarioId = Number(document.getElementById('usuarioPermiso').value);
+    const areaId    = Number(document.getElementById('areaId').value);
+    const fechaFin  = document.getElementById('fechaFin').value;
+    const resultado = document.getElementById('resultado');
+
+    const resp = await fetch('/autorizar-permiso', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuarioId, zona, vencimiento: fechaFin })
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ usuarioId, areaId, vencimiento: fechaFin })
     });
 
-    const resultado = document.getElementById('resultado');
-    if (respuesta.ok) {
+    if (resp.ok) {
       resultado.textContent = '✅ Permiso autorizado exitosamente';
       resultado.style.color = 'green';
     } else {
@@ -202,21 +276,20 @@
     }
   });
 
-  document.getElementById('revocarPermisoBtn').addEventListener('click', async function () {
-    const usuarioId = document.getElementById('usuarioPermiso').value;
-    if (!usuarioId) return;
+  document.getElementById('revocarPermisoBtn').addEventListener('click', async () => {
+    const usuarioId = Number(document.getElementById('usuarioPermiso').value);
+    const areaId    = Number(document.getElementById('areaId').value);
+    const resultado = document.getElementById('resultado');
+    if (!usuarioId || !areaId) return;
+    if (!confirm('¿Seguro que deseas revocar este permiso?')) return;
 
-    const confirmacion = confirm("¿Estás seguro de que deseas revocar el permiso de este usuario?");
-    if (!confirmacion) return;
-
-    const respuesta = await fetch('/revocar-permiso', {
+    const resp = await fetch('/revocar-permiso', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuarioId })
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ usuarioId, areaId })
     });
 
-    const resultado = document.getElementById('resultado');
-    if (respuesta.ok) {
+    if (resp.ok) {
       resultado.textContent = '✅ Permiso revocado exitosamente';
       resultado.style.color = 'green';
     } else {
@@ -225,15 +298,16 @@
     }
   });
 
-  // Botón cerrar sesión
   document.getElementById('cerrarSesionBtn').addEventListener('click', function () {
     loginSection.classList.remove('hidden');
     permisoSection.classList.add('hidden');
     loginForm.reset();
     document.getElementById('permiso-form').reset();
     document.getElementById('usuarioPermiso').innerHTML = '';
+    document.getElementById('areaId').innerHTML = '<option value="" disabled selected>Selecciona un área</option>';
     loginError.textContent = '';
     document.getElementById('resultado').textContent = '';
+    document.getElementById('db-status').textContent = '';
   });
 </script>
 

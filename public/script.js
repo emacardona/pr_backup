@@ -219,33 +219,42 @@ async function startCamera() {
             faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
             if (labeledFaceDescriptors.length > 0) {
-                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5); // Ajustar umbral a 0.5
+                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
                 const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
 
-                for (let result of results) {
-                    const box = resizedDetections[results.indexOf(result)].detection.box;
-                    const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString(), boxColor: result.label === 'unknown' ? 'red' : 'green' });
+                for (let i = 0; i < results.length; i++) {
+                    const result = results[i];
+                    const box = resizedDetections[i].detection.box;
+                    const drawBox = new faceapi.draw.DrawBox(box, {
+                        label: result.toString(),
+                        boxColor: result.label === 'unknown' ? 'red' : 'green'
+                    });
                     drawBox.draw(canvas);
 
                     if (result.label === 'unknown') {
-                        notifyUser('Usuario no encontrado', true);
+                        // ————— Usuario no reconocido —————
+                        notifyUser('🔴 Usuario no reconocido', true);
+                        const photoBase64 = capturePhoto(video);
 
-                        // 🚨 NUEVO: Registrar intento fallido
-                        const photoBase64 = capturePhoto(video); // Capturamos la imagen del intento
-                        await fetch('/register-failed-attempt', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                cedula: null,
-                                nombre: 'Desconocido',
-                                empresaId: selectedEmpresaId,
-                                motivo: 'Usuario no registrado',
-                                fotoIntento: photoBase64
-                            })
-                        });
+                        try {
+                            const resp = await fetch('/register-failed-attempt', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    nombre: 'Desconocido',
+                                    empresaId: selectedEmpresaId,
+                                    motivo: 'Usuario no registrado',
+                                    fotoIntento: photoBase64
+                                })
+                            });
+                            if (!resp.ok) {
+                                console.error('Error al registrar intento fallido:', await resp.text());
+                            }
+                        } catch (e) {
+                            console.error('Fetch error en intento fallido:', e);
+                        }
 
-                    } else // … dentro de for (let result of results) …
-                    if (result.distance < 0.5) {
+                    } else if (result.distance < 0.5) {
                         const nombre = result.label;
                         const userId = await getUserIdByName(nombre);
                         if (!userId) return;
@@ -335,31 +344,32 @@ function showCustomAlert(message) {
                 body: JSON.stringify({
                     usuarioId: userId,
                     empresaId: selectedEmpresaId,
-                    resultado_autenticacion,
+                    deviceCode: DEVICE_CODE,
+                    resultado_autenticacion: "Exitosa",
                     foto_intento: photoBase64
                 })
             });
+            const text = await response.text();
 
-            // Si ya había una entrada hoy, respondemos con el mensaje que venga del servidor
             if (response.status === 409) {
-                const msg = await response.text();
-                notifyUser(msg, true);
+                notifyUser(text, true);
                 return false;
             }
-
+            if (response.status === 403) {
+                notifyUser(text || 'No tienes permiso para esta área.', true);
+                return false;
+            }
             if (!response.ok) {
-                notifyUser('Error al registrar la entrada.', true);
+                notifyUser(text || 'Error al registrar la entrada.', true);
                 return false;
             }
 
-            // OK
             notifyUser('✅ Entrada registrada exitosamente.');
-            showCustomAlert('✅ Entrada registrada exitosamente.');
             return true;
 
         } catch (error) {
             console.error('Error de red al registrar la entrada:', error);
-            notifyUser('Error al conectar con el servidor.', true);
+            notifyUser('Error de conexión con el servidor.', true);
             return false;
         }
     }
@@ -370,35 +380,45 @@ function showCustomAlert(message) {
     async function registerExit(userId) {
         const localDate = new Date(); // Hora local del cliente
         try {
+            // Llamada al endpoint, pasamos deviceCode igual que en la entrada
             const response = await fetch('/register-exit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     usuarioId: userId,
-                    empresaId: selectedEmpresaId
+                    empresaId: selectedEmpresaId,
+                    deviceCode: DEVICE_CODE
                 })
             });
 
-            // Si no había entrada o ya hay salida, respondemos con el mensaje del servidor
+            // Leemos siempre el texto que devuelva el servidor
+            const text = await response.text();
+
+            // 409 = no hay entrada hoy o ya existe salida
             if (response.status === 409) {
-                const msg = await response.text();
-                notifyUser(msg, true);
+                notifyUser(text, true);
                 return false;
             }
 
+            // 403 = permiso denegado para registrar salida aquí
+            if (response.status === 403) {
+                notifyUser(text || 'No tienes permiso para registrar la salida en esta área.', true);
+                return false;
+            }
+
+            // Otros errores de servidor
             if (!response.ok) {
-                notifyUser('Error al registrar la salida.', true);
+                notifyUser(text || 'Error al registrar la salida.', true);
                 return false;
             }
 
-            // OK
+            // Si llegamos aquí, fue OK
             notifyUser('✅ Salida registrada exitosamente.');
-            showCustomAlert('✅ Salida registrada exitosamente.');
             return true;
 
         } catch (error) {
             console.error('Error de red al registrar la salida:', error);
-            notifyUser('Error al conectar con el servidor.', true);
+            notifyUser('Error de conexión con el servidor.', true);
             return false;
         }
     }
@@ -470,19 +490,38 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('error-message').textContent = "No se pudo cargar la lista de empresas.";
         });
 
-    // Cargar lista de áreas
-    fetch('/get-areas')
-        .then(res => res.ok ? res.json() : Promise.reject(res.status))
-        .then(areas => {
-            const sel = document.getElementById('areaSelect');
-            areas.forEach(a => {
-                const o = document.createElement('option');
-                o.value = a.id;
-                o.text  = a.nombre;
-                sel.appendChild(o);
+    async function cargarAreas() {
+        const sel = document.getElementById('areaId');
+        console.log('🔄 iniciar cargarAreas()');
+        sel.innerHTML = '<option value="" disabled selected>Selecciona un área</option>';
+
+        try {
+            console.log('➡️ fetch /get-areas');
+            const resp = await fetch('/get-areas');
+            console.log('📶 status:', resp.status);
+
+            const areas = await resp.json();
+            console.log('📋 areas recibidas:', areas);
+
+            if (!Array.isArray(areas) || areas.length === 0) {
+                sel.innerHTML = '<option disabled>No hay áreas registradas</option>';
+                return;
+            }
+
+            areas.forEach(area => {
+                const opt = document.createElement('option');
+                opt.value       = area.id;
+                opt.textContent = area.nombre;
+                sel.appendChild(opt);
             });
-        })
-        .catch(err => console.error('No se pudieron cargar las áreas:', err));
+            console.log('✅ select llenado con áreas');
+        } catch (err) {
+            console.error('❌ Error en cargarAreas:', err);
+            sel.innerHTML = `<option disabled>Error: ${err.message}</option>`;
+        }
+    }
+
+
 
 });
 
@@ -528,3 +567,4 @@ document.getElementById('user-form').addEventListener('submit', async function(e
         submitButton.disabled = false;
     }
 });
+

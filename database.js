@@ -1,12 +1,13 @@
 const mysql = require('mysql2');
 
 const connection = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'Neto45328341',
-    database: 'reconocimiento',
+    host: 'rds11g.isbelasoft.com',
+    user: 'p3ag1',
+    password: 'Umg123',
+    database: 'prograiiiag1',
     port: 3306,
-    ssl: false // Desactiva SSL
+    ssl: false, // Desactiva SSL
+    timezone: '-06:00'
 });
 
 connection.connect((err) => {
