@@ -69,16 +69,10 @@ app.get('/get-empresas', (req, res) => {
 });
 
 app.get('/get-areas', (req, res) => {
-    db.query(
-        'SELECT id, nombre FROM areas',
-        (err, results) => {
-            if (err) {
-                console.error('Error al obtener áreas:', err);
-                return res.status(500).send('Error al obtener áreas');
-            }
-            res.json(results); // ← devolverá algo como: [ { id: 1, nombre: "Almacén" }, ... ]
-        }
-    );
+    db.query('SELECT id, nombre FROM areas', (err, rows) => {
+        if (err) return res.status(500).json({ error: 'Error leyendo áreas' });
+        res.json(rows);
+    });
 });
 
 
@@ -339,87 +333,105 @@ app.post('/register-exit', (req, res) => {
     }
 });
 
-// AUTORIZAR PERMISO
+// Autorizar permisos
 app.post('/autorizar-permiso', (req, res) => {
-    const { usuarioId, areaId, vencimiento } = req.body;
-    if (!usuarioId || !areaId || !vencimiento) {
-        return res.status(400).send('Faltan datos');
+    const { usuarioId, zona /* viene el id del área */, vencimiento } = req.body;
+
+    // Validar fecha
+    const fechaVencimiento = new Date(vencimiento);
+    if (isNaN(fechaVencimiento.getTime())) {
+        return res.status(400).send('Formato de fecha inválido.');
     }
 
-    // formatea fecha
-    const f = new Date(vencimiento);
-    if (isNaN(f)) return res.status(400).send('Fecha inválida');
-    const mysqlDate = f.toISOString().slice(0,19).replace('T',' ');
-
-    // 1) Intentar UPDATE
-    const upd = `
-    UPDATE permisos_acceso
-    SET autorizado=1,
-        fecha_autorizacion=NOW(),
-        vencimiento=?
-    WHERE usuario_id=? AND area_id=?
-  `;
-    db.query(upd, [mysqlDate, usuarioId, areaId], (err, result) => {
-        if (err) {
-            console.error('Upd err:', err);
-            return res.status(500).send('Error DB');
-        }
-        if (result.affectedRows > 0) {
-            return res.sendStatus(204);
-        }
-
-        // 2) Si no existía, INSERT new
-        const ins = `
-      INSERT INTO permisos_acceso
-        (usuario_id, autorizado, fecha_autorizacion, vencimiento, area_id)
-      VALUES (?,         1,          NOW(),              ?,          ?)
-    `;
-        db.query(ins, [usuarioId, mysqlDate, areaId], err2 => {
-            if (err2) {
-                console.error('Ins err:', err2);
-                return res.status(500).send('Error DB');
+    db.query(
+        `INSERT INTO permisos_acceso
+      (usuario_id, autorizado, fecha_autorizacion, vencimiento, area_id)
+     VALUES (?, 1, NOW(), ?, ?)`,
+        [ usuarioId, fechaVencimiento, zona ],
+        err => {
+            if (err) {
+                console.error(err);
+                return res.status(500).send('Error al guardar el permiso');
             }
-            return res.sendStatus(204);
-        });
-    });
+            res.send('Permiso autorizado correctamente');
+        }
+    );
 });
 
-// REVOCAR PERMISO
+// Revocar permiso
 app.post('/revocar-permiso', (req, res) => {
-    const { usuarioId, areaId } = req.body;
-    if (!usuarioId || !areaId) {
-        return res.status(400).send('Faltan datos');
-    }
-    const sql = `
-    UPDATE permisos_acceso
-    SET autorizado=0
-    WHERE usuario_id=? AND area_id=? AND vencimiento>NOW()
-  `;
-    db.query(sql, [usuarioId, areaId], (err, result) => {
-        if (err) {
-            console.error('Revoke err:', err);
-            return res.status(500).send('Error DB');
+    const { usuarioId, zona } = req.body;  // zona = id del area
+
+    db.query(
+        `UPDATE permisos_acceso
+       SET autorizado = 0
+     WHERE usuario_id = ?
+       AND area_id    = ?
+       AND autorizado = 1`,      // solo los que todavía están en 1
+        [ usuarioId, zona ],
+        (err, result) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).send('Error al revocar el permiso');
+            }
+            if (result.affectedRows === 0) {
+                return res.status(404).send('No se encontró permiso vigente para revocar');
+            }
+            res.send('Permiso revocado exitosamente');
         }
-        if (result.affectedRows === 0) {
-            return res.status(404).send('No hay permiso vigente');
-        }
-        res.sendStatus(204);
-    });
+    );
 });
 
 
 
 
-// Validar login admin
+// LOGIN — usa la columna `id` de admin_usuarios
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
-    const query = `SELECT * FROM admin_usuarios WHERE username = ? AND password = ?`;
-    db.query(query, [username, password], (err, results) => {
-        if (err) return res.status(500).send('Error del servidor');
-        if (results.length > 0) res.sendStatus(200);
-        else res.sendStatus(401);
+
+    db.query(
+        `SELECT id AS usuarioId
+       FROM admin_usuarios
+      WHERE username = ?
+        AND password = ?`,
+        [ username, password ],
+        (err, results) => {
+            if (err) {
+                console.error('Error en /login:', err);
+                return res.status(500).send(err.message);
+            }
+            if (results.length === 0) {
+                return res.status(401).send('Credenciales inválidas');
+            }
+            // Devolvemos el ID correcto
+            res.json({ usuarioId: results[0].usuarioId });
+        }
+    );
+});
+
+// GET DEFAULT USERS — para filtrar en el front según DEVICE_CODE
+app.get('/get-default-users', (req, res) => {
+    const { deviceCode } = req.query;
+
+    const sql = `
+    SELECT u.id
+      FROM tabla_usuarios u
+      JOIN dispositivos d ON u.area_id = d.area_id
+     WHERE d.device_code = ?
+  `;
+    db.query(sql, [ deviceCode ], (err, rows) => {
+        if (err) {
+            console.error('Error en /get-default-users:', err);
+            return res.status(500).send('Error al obtener usuarios por defecto');
+        }
+        // Enviamos un array de IDs: { defaultUsers: [1,2,3,…] }
+        const defaultUsers = rows.map(r => r.id);
+        res.json({ defaultUsers });
     });
 });
+
+
+
 
 // Obtener ID por cédula
 app.get('/get-user-id-by-cedula', (req, res) => {
@@ -435,24 +447,7 @@ app.get('/get-user-id-by-cedula', (req, res) => {
 
 
 
-// Endpoint para chequear la tabla permisos_acceso
-app.get('/check-permisos-acceso', async (req, res) => {
-    try {
-        // Esto solo comprueba que la tabla existe y responde
-        await db.promise().query('SELECT 1 FROM permisos_acceso LIMIT 1');
-        res.json({ connected: true, tableExists: true });
-    } catch (err) {
-        if (err.code === 'ER_NO_SUCH_TABLE') {
-            // La conexión a BD está bien, pero falta la tabla
-            return res.json({ connected: true, tableExists: false });
-        }
-        // Otro error (p.ej. BD inaccesible)
-        res.status(500).json({ connected: false, tableExists: false });
-    }
-});
-
 // Iniciar servidor
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
-

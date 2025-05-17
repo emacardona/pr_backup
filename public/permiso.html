@@ -95,9 +95,10 @@
 <body>
 
 <div class="container">
-  <!-- Estado de conexión a BD -->
+  <!-- Estado de conexión a BD (opcional) -->
   <div id="db-status"></div>
 
+  <!-- Sección de Login -->
   <div id="login-section">
     <h2>Iniciar Sesión</h2>
     <form id="login-form">
@@ -112,18 +113,16 @@
     <div id="login-error" style="color: red; margin-top: 10px; text-align: center;"></div>
   </div>
 
+  <!-- Sección de Gestión de Permisos -->
   <div id="permiso-section" class="hidden">
     <h2>Gestionar Permiso</h2>
     <form id="permiso-form">
       <label for="usuarioPermiso">Selecciona el Usuario:</label>
       <select id="usuarioPermiso" required></select>
 
-      <label for="areaId">Selecciona un Área:</label>
-      <select id="areaId" name="areaId" required>
+      <label for="zona">Selecciona un Área:</label>
+      <select id="zona" name="zona" required>
         <option value="" disabled selected>Selecciona un área</option>
-        <option value="1">Almacén</option>
-        <option value="2">Oficina</option>
-        <option value="3">Bodega</option>
       </select>
 
       <label for="fechaFin">Fecha de Vencimiento:</label>
@@ -138,179 +137,149 @@
 </div>
 
 <script>
-  const loginForm = document.getElementById('login-form');
-  const loginSection = document.getElementById('login-section');
-  const permisoSection = document.getElementById('permiso-section');
-  const loginError = document.getElementById('login-error');
+  // ① Variables globales
+  const DEVICE_CODE     = '02';
+  let   CURRENT_USER_ID = null;
+  let   DEFAULT_USERS   = [];   // ← Aquí guardamos los IDs a ocultar
 
-  loginForm.addEventListener('submit', async function (e) {
+  // ② Login
+  document.getElementById('login-form').addEventListener('submit', async e => {
     e.preventDefault();
-    const usuario = document.getElementById('usuario').value;
-    const contrasena = document.getElementById('contrasena').value;
+    const username = document.getElementById('usuario').value;
+    const password = document.getElementById('contrasena').value;
 
-    const response = await fetch('/login', {
+    const res = await fetch('/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: usuario, password: contrasena })
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ username, password })
     });
 
-    if (response.ok) {
-      loginSection.classList.add('hidden');
-      permisoSection.classList.remove('hidden');
-
-      // Validar conexión a BD y tabla permisos_acceso
-      await validarConexion();
-
-      // Cargar datos sólo si la conexión fue exitosa
-      cargarUsuarios();
-      cargarAreas();
-    } else {
-      loginError.textContent = '❌ Usuario o contraseña incorrectos.';
+    if (!res.ok) {
+      const err = await res.text();
+      document.getElementById('login-error').textContent = '❌ ' + err;
+      return;
     }
-  });
 
-  async function validarConexion() {
-    const statusDiv = document.getElementById('db-status');
-    statusDiv.textContent = 'Comprobando conexión a la base de datos...';
-    statusDiv.style.color = 'black';
+    const { usuarioId } = await res.json();
+    CURRENT_USER_ID = usuarioId;
 
+    // ── Obtenemos los usuarios por defecto de este dispositivo
     try {
-      const resp = await fetch('/check-permisos-acceso');
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const { connected, tableExists } = await resp.json();
-
-      if (connected && tableExists) {
-        statusDiv.textContent = '✅ Conectado y tabla permisos_acceso encontrada';
-        statusDiv.style.color = 'green';
-      } else if (connected) {
-        statusDiv.textContent = '⚠️ Conexión OK, pero tabla permisos_acceso NO existe';
-        statusDiv.style.color = 'orange';
+      const respDefaults = await fetch(`/get-default-users?deviceCode=${DEVICE_CODE}`);
+      if (respDefaults.ok) {
+        const { defaultUsers } = await respDefaults.json();
+        DEFAULT_USERS = defaultUsers;
+        console.log('▶ DEFAULT_USERS =', DEFAULT_USERS);
       } else {
-        statusDiv.textContent = '❌ Conectado con errores';
-        statusDiv.style.color = 'red';
+        console.warn('No se pudieron cargar usuarios por defecto');
       }
     } catch (err) {
-      statusDiv.textContent = `❌ Error al conectar: ${err.message}`;
-      statusDiv.style.color = 'red';
+      console.error('Error al fetch /get-default-users:', err);
     }
-  }
 
+    // ── Mostrar sección de permisos
+    document.getElementById('login-section').classList.add('hidden');
+    document.getElementById('permiso-section').classList.remove('hidden');
+    cargarUsuarios();
+    cargarZonas();
+  });
+
+  // ③ Carga y filtra usuarios
   async function cargarUsuarios() {
-    const select = document.getElementById('usuarioPermiso');
-    select.innerHTML = '';
-    try {
-      const response = await fetch('/get-users?empresaId=3');
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      const usuarios = await response.json();
+    const sel = document.getElementById('usuarioPermiso');
+    sel.innerHTML = '';
 
-      if (usuarios.length === 0) {
-        const option = document.createElement('option');
-        option.textContent = "No hay usuarios registrados.";
-        option.disabled = true;
-        option.selected = true;
-        select.appendChild(option);
-        return;
-      }
+    // 1) Traigo todos los usuarios de la empresa
+    const resp    = await fetch('/get-users?empresaId=3');
+    const users   = await resp.json();
+    console.log('▶ usuarios originales:', users);
 
-      usuarios.forEach(usuario => {
-        const option = document.createElement('option');
-        option.value = usuario.id;
-        option.textContent = `${usuario.nombre} - ${usuario.cedula} - ${usuario.cargo}`;
-        select.appendChild(option);
-      });
-    } catch (error) {
-      const option = document.createElement('option');
-      option.textContent = `Error: ${error.message}`;
-      select.appendChild(option);
+    // 2) Quito siempre los DEFAULT_USERS (vienen de /get-default-users)
+    const visibles = users.filter(u => !DEFAULT_USERS.includes(u.id));
+    console.log('▶ usuarios filtrados:', visibles);
+
+    // 3) Pinto el select
+    if (visibles.length === 0) {
+      sel.innerHTML = '<option disabled>No hay usuarios.</option>';
+    } else {
+      sel.innerHTML = visibles
+              .map(u => `<option value="${u.id}">${u.nombre} – ${u.cedula}</option>`)
+              .join('');
     }
   }
 
-  async function cargarAreas() {
-    const select = document.getElementById('areaId');
-    select.innerHTML = '<option value="" disabled selected>Selecciona un área</option>';
+
+  // ④ Carga áreas
+  async function cargarZonas() {
+    const sel = document.getElementById('zona');
+    sel.innerHTML = '<option value="" disabled selected>Selecciona un área</option>';
     try {
-      const response = await fetch('/get-areas');
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      const areas = await response.json();
-
-      if (areas.length === 0) {
-        const option = document.createElement('option');
-        option.textContent = "No hay áreas registradas.";
-        option.disabled = true;
-        select.appendChild(option);
-        return;
-      }
-
-      areas.forEach(area => {
-        const option = document.createElement('option');
-        option.value = area.id;
-        option.textContent = area.nombre;
-        select.appendChild(option);
-      });
-    } catch (error) {
-      const option = document.createElement('option');
-      option.textContent = `Error: ${error.message}`;
-      select.appendChild(option);
+      const zonas = await (await fetch('/get-areas')).json();
+      sel.innerHTML += zonas.map(z =>
+              `<option value="${z.id}">${z.nombre}</option>`
+      ).join('');
+    } catch (err) {
+      console.error(err);
+      sel.innerHTML += `<option disabled>Error: ${err.message}</option>`;
     }
   }
 
+  // ⑤ Autorizar permiso
   document.getElementById('permiso-form').addEventListener('submit', async ev => {
     ev.preventDefault();
-    const usuarioId = Number(document.getElementById('usuarioPermiso').value);
-    const areaId    = Number(document.getElementById('areaId').value);
-    const fechaFin  = document.getElementById('fechaFin').value;
-    const resultado = document.getElementById('resultado');
+    const usuarioId   = +document.getElementById('usuarioPermiso').value;
+    const zona        = +document.getElementById('zona').value;
+    const vencimiento = document.getElementById('fechaFin').value;
+    const out         = document.getElementById('resultado');
 
-    const resp = await fetch('/autorizar-permiso', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ usuarioId, areaId, vencimiento: fechaFin })
-    });
-
-    if (resp.ok) {
-      resultado.textContent = '✅ Permiso autorizado exitosamente';
-      resultado.style.color = 'green';
-    } else {
-      resultado.textContent = '❌ Error al autorizar el permiso';
-      resultado.style.color = 'red';
+    try {
+      const resp = await fetch('/autorizar-permiso', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ usuarioId, zona, vencimiento })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      out.textContent = '✅ Permiso autorizado correctamente';
+      out.style.color = 'green';
+    } catch (err) {
+      console.error(err);
+      out.textContent = '❌ ' + err.message;
+      out.style.color = 'red';
     }
   });
 
+  // ⑥ Revocar permiso
   document.getElementById('revocarPermisoBtn').addEventListener('click', async () => {
-    const usuarioId = Number(document.getElementById('usuarioPermiso').value);
-    const areaId    = Number(document.getElementById('areaId').value);
-    const resultado = document.getElementById('resultado');
-    if (!usuarioId || !areaId) return;
+    const usuarioId = +document.getElementById('usuarioPermiso').value;
+    const zona      = +document.getElementById('zona').value;
+    const out       = document.getElementById('resultado');
     if (!confirm('¿Seguro que deseas revocar este permiso?')) return;
 
-    const resp = await fetch('/revocar-permiso', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ usuarioId, areaId })
-    });
-
-    if (resp.ok) {
-      resultado.textContent = '✅ Permiso revocado exitosamente';
-      resultado.style.color = 'green';
-    } else {
-      resultado.textContent = '❌ Error al revocar el permiso';
-      resultado.style.color = 'red';
+    try {
+      const resp = await fetch('/revocar-permiso', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ usuarioId, zona })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      out.textContent = '✅ Permiso revocado exitosamente';
+      out.style.color = 'green';
+    } catch (err) {
+      console.error(err);
+      out.textContent = '❌ ' + err.message;
+      out.style.color = 'red';
     }
   });
 
-  document.getElementById('cerrarSesionBtn').addEventListener('click', function () {
-    loginSection.classList.remove('hidden');
-    permisoSection.classList.add('hidden');
-    loginForm.reset();
+  // ⑦ Cerrar sesión
+  document.getElementById('cerrarSesionBtn').addEventListener('click', () => {
+    document.getElementById('login-section').classList.remove('hidden');
+    document.getElementById('permiso-section').classList.add('hidden');
+    document.getElementById('login-form').reset();
     document.getElementById('permiso-form').reset();
-    document.getElementById('usuarioPermiso').innerHTML = '';
-    document.getElementById('areaId').innerHTML = '<option value="" disabled selected>Selecciona un área</option>';
-    loginError.textContent = '';
     document.getElementById('resultado').textContent = '';
-    document.getElementById('db-status').textContent = '';
+    document.getElementById('login-error').textContent = '';
   });
 </script>
-
 </body>
 </html>
-
