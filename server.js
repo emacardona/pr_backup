@@ -157,6 +157,7 @@ app.post('/register-entry', (req, res) => {
         usuarioId,
         empresaId,
         deviceCode,
+        ubicacion = '',
         resultado_autenticacion,
         foto_intento
     } = req.body;
@@ -222,7 +223,7 @@ app.post('/register-entry', (req, res) => {
         `;
         const params = [
             usuarioId, empresaId,
-            /*ubicacion*/ null, resultado_autenticacion, imageBuffer,
+            ubicacion, resultado_autenticacion, imageBuffer,
             usuarioId, empresaId
         ];
         db.query(q, params, (err, result) => {
