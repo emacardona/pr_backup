@@ -157,7 +157,7 @@ app.post('/register-entry', (req, res) => {
         usuarioId,
         empresaId,
         deviceCode,
-        ubicacion = '',
+        ubicacion = 'Almacen',
         resultado_autenticacion,
         foto_intento
     } = req.body;
@@ -244,19 +244,19 @@ app.post('/register-entry', (req, res) => {
 
 // Registrar intento fallido
 app.post('/register-failed-attempt', (req, res) => {
-    const { nombre, empresaId, motivo, fotoIntento } = req.body;
+    const { nombre, empresaId, motivo, fotoIntento , deviceCode } = req.body;
     const imageBuffer = fotoIntento
         ? Buffer.from(fotoIntento.split(',')[1], 'base64')
         : null;
 
-    console.log('⚠️ Intento fallido recibido:', { nombre, empresaId, motivo });
+    console.log('⚠️ Intento fallido recibido:', { nombre, empresaId, motivo, deviceCode });
 
     const insertarIntento = `
     INSERT INTO intentos_fallidos
-      (nombre, empresa_id, fecha, motivo, foto_intento)
-    VALUES (?, ?, NOW(), ?, ?)
+      (nombre, empresa_id, fecha, motivo, foto_intento , ubicacionfallida)
+    VALUES (?, ?, NOW(), ?, ?, ?)
   `;
-    db.query(insertarIntento, [ nombre, empresaId, motivo, imageBuffer ], (err) => {
+    db.query(insertarIntento, [ nombre, empresaId, motivo, imageBuffer, deviceCode ], (err) => {
         if (err) {
             console.error('❌ Error al insertar intento fallido:', err);
             return res.status(500).send('Error al registrar intento fallido');

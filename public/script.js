@@ -244,7 +244,8 @@ async function startCamera() {
                                     nombre: 'Desconocido',
                                     empresaId: selectedEmpresaId,
                                     motivo: 'Usuario no registrado',
-                                    fotoIntento: photoBase64
+                                    fotoIntento: photoBase64,
+                                    deviceCode: DEVICE_CODE
                                 })
                             });
                             if (!resp.ok) {
