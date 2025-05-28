@@ -289,9 +289,8 @@ app.post('/register-entry', (req, res) => {
 });
 
 
-// Registrar intento fallido
 app.post('/register-failed-attempt', (req, res) => {
-    const { nombre, empresaId, motivo, fotoIntento , deviceCode } = req.body;
+    const { nombre, empresaId, motivo, fotoIntento, deviceCode } = req.body;
     const imageBuffer = fotoIntento
         ? Buffer.from(fotoIntento.split(',')[1], 'base64')
         : null;
@@ -299,19 +298,42 @@ app.post('/register-failed-attempt', (req, res) => {
     console.log('⚠️ Intento fallido recibido:', { nombre, empresaId, motivo, deviceCode });
 
     const insertarIntento = `
-    INSERT INTO intentos_fallidos
-      (nombre, empresa_id, fecha, motivo, foto_intento , ubicacionfallida)
-    VALUES (?, ?, NOW(), ?, ?, ?)
-  `;
-    db.query(insertarIntento, [ nombre, empresaId, motivo, imageBuffer, deviceCode ], (err) => {
-        if (err) {
-            console.error('❌ Error al insertar intento fallido:', err);
-            return res.status(500).send('Error al registrar intento fallido');
+        INSERT INTO intentos_fallidos
+        (nombre, empresa_id, fecha, motivo, foto_intento, ubicacionfallida)
+        VALUES (?, ?, NOW(), ?, ?, ?)
+    `;
+
+    // Usa una función async separada para poder usar await
+    (async () => {
+        try {
+            await new Promise((resolve, reject) => {
+                db.query(insertarIntento, [nombre, empresaId, motivo, imageBuffer, deviceCode], (err) => {
+                    if (err) return reject(err);
+                    resolve();
+                });
+            });
+
+            console.log('✅ Intento fallido registrado.');
+
+            const mensaje = `
+                Intento fallido detectado
+                Nombre: ${nombre}
+                Empresa ID: ${empresaId}
+                Motivo: ${motivo}
+                Dispositivo: ${deviceCode}
+                Fecha: ${new Date().toLocaleString()}
+            `.trim();
+
+            const base64ImageOnly = fotoIntento?.split(',')[1] || null;
+            await sendSecurityAlert('⚠️ Alerta de Intento Fallido', mensaje, base64ImageOnly);
+            res.status(201).send('Intento fallido registrado.');
+        } catch (err) {
+            console.error('❌ Error al insertar intento fallido o enviar correo:', err);
+            res.status(500).send('Error al registrar intento fallido');
         }
-        console.log('✅ Intento fallido registrado.');
-        res.status(201).send('Intento fallido registrado.');
-    });
+    })();
 });
+
 
 
 // Registrar salida
