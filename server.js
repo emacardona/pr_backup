@@ -152,23 +152,20 @@ app.post('/upload', upload.single('photo'), (req, res) => {
 
 // Registrar entrada
 app.post('/register-entry', (req, res) => {
-    // 1) Desempaquetamos los datos de la petición
     const {
         usuarioId,
         empresaId,
         deviceCode,
-        ubicacion = 'Almacen',
         resultado_autenticacion,
         foto_intento
     } = req.body;
     console.log('▶ /register-entry recibida:', { usuarioId, empresaId, deviceCode });
 
-    // Preparamos el buffer de la imagen
     const imageBuffer = foto_intento
         ? Buffer.from(foto_intento.split(',')[1], 'base64')
         : null;
 
-    // 2) Consulta “por defecto”: usuario.area_id == dispositivo.area_id
+    // 1) ¿Área por defecto?
     const checkDefault = `
     SELECT COUNT(*) AS cnt
       FROM tabla_usuarios u
@@ -177,13 +174,15 @@ app.post('/register-entry', (req, res) => {
   `;
     db.query(checkDefault, [usuarioId, deviceCode], (err, defaultRows) => {
         if (err) {
-            console.error('Error validando permisos:', err);
+            console.error('Error validando permisos por defecto:', err);
             return res.status(500).send('Error validando permisos');
         }
         console.log('checkDefault result:', defaultRows[0].cnt);
-        if (defaultRows[0].cnt > 0) return proceed();
+        if (defaultRows[0].cnt > 0) {
+            return getDeviceZonaAndInsert();
+        }
 
-        // 3) Si no entra “por defecto”, chequeo de permisos especiales
+        // 2) ¿Permiso especial?
         const checkPerms = `
       SELECT COUNT(*) AS cnt
         FROM permisos_acceso p
@@ -199,15 +198,60 @@ app.post('/register-entry', (req, res) => {
                 return res.status(500).send('Error validando permisos especiales');
             }
             console.log('checkPerms result:', permRows[0].cnt);
-            if (permRows[0].cnt > 0) return proceed();
-            // Si tampoco tiene permiso especial:
+            if (permRows[0].cnt > 0) {
+                return getPermZonaAndInsert();
+            }
+            // 3) Ningún permiso
             return res.status(403).send('No tiene permiso para ingresar en esta área');
         });
     });
 
-    // 4) Función interna que solo corre si pasó alguna validación
-    function proceed() {
-        console.log('>>> proceed() llamado para usuario', usuarioId, 'en device', deviceCode);
+    // Inserta usando la zona del dispositivo
+    function getDeviceZonaAndInsert() {
+        console.log('>>> Zona por defecto (dispositivo)');
+        const qZona = `
+      SELECT a.nombre AS zona
+        FROM dispositivos d
+        JOIN areas a ON d.area_id = a.id
+       WHERE d.device_code = ?
+    `;
+        db.query(qZona, [deviceCode], (err, zonaRows) => {
+            if (err) {
+                console.error('Error al obtener zona de dispositivo:', err);
+                return res.status(500).send('Error al obtener zona');
+            }
+            const ubicacion = zonaRows[0]?.zona || 'Sin zona';
+            insertRegistro(ubicacion);
+        });
+    }
+
+    // Inserta usando la zona del permiso puntual
+    function getPermZonaAndInsert() {
+        console.log('>>> Zona por permiso especial');
+        const qZona = `
+      SELECT a.nombre AS zona
+        FROM permisos_acceso p
+        JOIN areas a ON p.area_id = a.id
+        JOIN dispositivos d ON d.area_id = p.area_id
+       WHERE p.usuario_id  = ?
+         AND d.device_code = ?
+         AND p.autorizado  = 1
+         AND p.vencimiento > NOW()
+      LIMIT 1
+    `;
+        db.query(qZona, [usuarioId, deviceCode], (err, zonaRows) => {
+            if (err) {
+                console.error('Error al obtener zona de permiso:', err);
+                return res.status(500).send('Error al obtener zona de permiso');
+            }
+            const ubicacion = zonaRows[0]?.zona || 'Sin zona';
+            insertRegistro(ubicacion);
+        });
+    }
+
+    // Función común de INSERT en registro
+    function insertRegistro(ubicacion) {
+        console.log('>>> insertRegistro() con ubicación =', ubicacion);
         const q = `
             INSERT INTO registro
             (usuario_id, empresa_id, hora_entrada, ubicacion, resultado_autenticacion, foto_intento)
@@ -216,22 +260,24 @@ app.post('/register-entry', (req, res) => {
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM registro
-                WHERE usuario_id = ?
-                  AND empresa_id = ?
+                WHERE usuario_id    = ?
+                  AND empresa_id    = ?
                   AND DATE(hora_entrada) = CURDATE()
             )
         `;
         const params = [
-            usuarioId, empresaId,
-            ubicacion, resultado_autenticacion, imageBuffer,
-            usuarioId, empresaId
+            usuarioId,
+            empresaId,
+            ubicacion,
+            resultado_autenticacion,
+            imageBuffer,
+            usuarioId,
+            empresaId
         ];
         db.query(q, params, (err, result) => {
             if (err) {
                 console.error('INSERT registro falló:', err);
-                return res
-                    .status(500)
-                    .send(`Error al registrar la entrada: ${err.message}`);
+                return res.status(500).send(`Error al registrar la entrada: ${err.message}`);
             }
             console.log('INSERT registro OK, affectedRows=', result.affectedRows);
             if (result.affectedRows === 0) {
@@ -241,6 +287,7 @@ app.post('/register-entry', (req, res) => {
         });
     }
 });
+
 
 // Registrar intento fallido
 app.post('/register-failed-attempt', (req, res) => {
