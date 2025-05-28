@@ -288,7 +288,6 @@ app.post('/register-entry', (req, res) => {
     }
 });
 
-
 app.post('/register-failed-attempt', (req, res) => {
     const { nombre, empresaId, motivo, fotoIntento, deviceCode } = req.body;
     const imageBuffer = fotoIntento
@@ -303,9 +302,26 @@ app.post('/register-failed-attempt', (req, res) => {
         VALUES (?, ?, NOW(), ?, ?, ?)
     `;
 
-    // Usa una función async separada para poder usar await
+    const obtenerNombreArea = `
+        SELECT a.nombre AS area
+        FROM dispositivos d
+        JOIN areas a ON d.area_id = a.id
+        WHERE d.device_code = ?
+        LIMIT 1
+    `;
+
     (async () => {
         try {
+            // 1. Obtener el nombre del área según el deviceCode
+            const areaNombre = await new Promise((resolve, reject) => {
+                db.query(obtenerNombreArea, [deviceCode], (err, results) => {
+                    if (err) return reject(err);
+                    const area = results[0]?.area || 'Desconocida';
+                    resolve(area);
+                });
+            });
+
+            // 2. Insertar el intento fallido
             await new Promise((resolve, reject) => {
                 db.query(insertarIntento, [nombre, empresaId, motivo, imageBuffer, deviceCode], (err) => {
                     if (err) return reject(err);
@@ -315,24 +331,35 @@ app.post('/register-failed-attempt', (req, res) => {
 
             console.log('✅ Intento fallido registrado.');
 
+            // 3. Construir mensaje de correo
             const mensaje = `
-                Intento fallido detectado
-                Nombre: ${nombre}
-                Empresa ID: ${empresaId}
-                Motivo: ${motivo}
-                Dispositivo: ${deviceCode}
-                Fecha: ${new Date().toLocaleString()}
+            SEGURIDAD GLOBAL S.A.
+            Nombre: ${nombre}
+            Área: ${areaNombre}
+            Motivo: ${motivo}
+            Fecha: ${new Date().toLocaleString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            })}
             `.trim();
 
+            // 4. Quitar encabezado base64 si lo hay
             const base64ImageOnly = fotoIntento?.split(',')[1] || null;
-            await sendSecurityAlert('⚠️ Alerta de Intento Fallido', mensaje, base64ImageOnly);
+
+            await sendSecurityAlert('⚠️ Alerta de Intento Fallido ⚠️', mensaje, base64ImageOnly);
             res.status(201).send('Intento fallido registrado.');
         } catch (err) {
-            console.error('❌ Error al insertar intento fallido o enviar correo:', err);
+            console.error('❌ Error al registrar intento fallido o enviar correo:', err);
             res.status(500).send('Error al registrar intento fallido');
         }
     })();
 });
+
 
 
 
