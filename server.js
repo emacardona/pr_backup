@@ -6,7 +6,7 @@ const db = require('./database');
 const nodemailer = require('nodemailer');
 const mysql = require('mysql2');
 const app = express();
-const port = 3001;
+const port = 3000;
 
 // Configuración de Nodemailer
 const transporter = nodemailer.createTransport({
@@ -541,8 +541,8 @@ app.get('/get-user-id-by-cedula', (req, res) => {
 });
 
 
-
-
+// Servir archivos estáticos desde la carpeta 'public'
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Iniciar servidor
 app.listen(port, () => {
