@@ -10,14 +10,26 @@ const connection = mysql.createConnection({
     timezone: '-06:00'
 });
 
-connection.connect((err) => {
+connection.connect(err => {
     if (err) {
-        console.error('Error conectando a la base de datos: ', err.stack);
+        console.error('Error conectando a la base de datos:', err.stack);
         return;
     }
-    console.log('Conectado a la base de datos MySQL. ID de conexión: ' + connection.threadId);
-});
 
+    // 1) Fijamos la zona horaria de la sesión
+    connection.query("SET time_zone = '-06:00'", tzErr => {
+        if (tzErr) {
+            console.error('No pude fijar time_zone:', tzErr);
+            return;
+        }
+
+        // 2) Sólo cuando ya esté fijada la zona, confirmamos la conexión
+        console.log(
+            'Conectado a la base de datos MySQL (GMT-6), ID de conexión:',
+            connection.threadId
+        );
+    });
+});
 
 module.exports = connection;
 
