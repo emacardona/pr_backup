@@ -4,6 +4,9 @@ let cedulaNombreMap = {}; // Mapa de cédula a nombre
 let selectedEmpresaId = null;
 let descriptorsCache = {}; // Cache para los descriptores
 let loadedUsers = new Set(); // Set para evitar duplicación de usuarios
+let recognitionActive = false;
+let intervalId = null;
+
 
 // Mostrar mensaje de carga
 function showLoadingMessage(show) {
@@ -114,6 +117,9 @@ function capturePhoto(videoElement) {
 
 // Función para activar la cámara y realizar el reconocimiento facial
 async function startCamera() {
+    if (recognitionActive) return; // Evita activar más de una vez
+    recognitionActive = true;
+
     if (!modelsLoaded) {
         console.error("Los modelos no se han cargado aún.");
         return;
@@ -130,12 +136,18 @@ async function startCamera() {
             })
             .catch(function(error) {
                 console.error("Error al activar la cámara: ", error);
+                return;
             });
     } else {
         console.error("getUserMedia no es soportado en este navegador.");
+        return;
     }
 
     video.addEventListener('loadeddata', async () => {
+        // 🔴 Elimina canvas anterior si ya existe
+        const oldCanvas = document.querySelector('#camera canvas');
+        if (oldCanvas) oldCanvas.remove();
+
         const canvas = faceapi.createCanvasFromMedia(video);
         canvas.style.position = 'absolute';
         canvas.style.top = '0';
@@ -151,6 +163,12 @@ async function startCamera() {
 
         updateCanvasSize();
         window.addEventListener('resize', updateCanvasSize);
+
+         // Aquí empieza el reconocimiento repetitivo (cada 1 segundo)
+        intervalId = setInterval(async () => {
+            // Tu lógica actual de reconocimiento va aquí (detections, drawBox, notifyUser, etc.)
+            // 👇👇👇 Esto no lo borres, mantén tu lógica aquí.
+        }, 1000);
 
         let previousBox = null;
         let stillFrames = 0;
@@ -280,6 +298,7 @@ async function startCamera() {
                         if (ok) {
                             notifyUser(`✅ ${tipo.charAt(0).toUpperCase()+tipo.slice(1)} registrada exitosamente para ${nombre}`);
                             showCustomAlert(`✅ ${tipo.charAt(0).toUpperCase()+tipo.slice(1)}: ${nombre}`);
+                            mostrarAccesoReconocido(nombre);
                         }
                     }
                 }
@@ -535,6 +554,24 @@ document.getElementById('user-form').addEventListener('submit', async function(e
         if (response.ok) {
             alert('Usuario agregado exitosamente');
             this.reset(); // Limpiar el formulario después de agregar el usuario
+            // ✅ Ocultar imagen previa
+            const preview = document.getElementById('preview-image');
+            preview.style.display = 'none';
+            preview.src = '#';
+
+            // ✅ Apagar cámara previa
+            const cameraPreview = document.getElementById('camera-preview');
+            cameraPreview.style.display = 'none';
+            if (cameraPreview.srcObject) {
+                cameraPreview.srcObject.getTracks().forEach(track => track.stop());
+                cameraPreview.srcObject = null;
+            }
+
+            // ✅ Vaciar campo file
+            document.getElementById('photo').value = '';
+
+            // ✅ Recargar descriptores para que sea reconocido sin recargar la página
+            await loadLabeledImagesAsync();
         } else if (response.status === 400) {
             alert('El usuario ya está registrado para esta empresa');
         } else {
@@ -548,4 +585,41 @@ document.getElementById('user-form').addEventListener('submit', async function(e
         loadingMessage.style.display = 'none';
         submitButton.disabled = false;
     }
+});
+// Evento para detener cámara y limpiar recursos
+document.getElementById('stop-camera').addEventListener('click', () => {
+    const video = document.getElementById('video');
+
+    // Detener la cámara
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+        console.log("Cámara detenida");
+    }
+
+    // Detener reconocimiento facial
+    recognitionActive = false;
+
+    // Limpiar canvas
+    const canvas = document.querySelector('#camera canvas');
+    if (canvas) canvas.remove();
+
+    // Limpiar intervalos
+    if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+    }
+
+    // Ocultar mensajes
+    const result = document.getElementById('recognition-result');
+    if (result) {
+        result.style.display = 'none';
+    }
+
+    const alertBox = document.getElementById('custom-alert');
+    if (alertBox) {
+        alertBox.style.display = 'none';
+    }
+
+    console.log("Reconocimiento facial detenido y recursos limpiados.");
 });

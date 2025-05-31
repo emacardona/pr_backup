@@ -8,6 +8,129 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+
+    <style>
+.spinner-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1055;
+    opacity: 1;
+}
+
+.spinner-content {
+    text-align: center;
+    color: white;
+}
+
+#main-content {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.5s ease;
+}
+
+#main-content.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.card {
+    background: rgba(255, 255, 255, 0.8) !important;
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.fa-check-circle,
+.fa-camera {
+    animation: pulse 2.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.15);
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #121212;
+        color: #e0e0e0;
+    }
+
+    .card {
+        background-color: rgba(30, 30, 30, 0.85) !important;
+        color: #fff;
+    }
+
+    .form-control,
+    .form-select {
+        background-color: #1e1e1e;
+        color: #fff;
+        border: 1px solid #444;
+    }
+}
+.card.shadow {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border-radius: 16px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+    padding: 25px;
+    transition: all 0.3s ease;
+}
+.recognition-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border-radius: 16px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+    padding: 25px;
+    transition: all 0.3s ease;
+}
+
+#start-camera {
+    border-radius: 8px;
+    font-weight: 600;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+#start-camera:hover {
+    background-color: #0d6efd;
+    box-shadow: 0 0 10px rgba(13, 110, 253, 0.5);
+}
+
+.card-title {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #003366; /* Azul medianoche serio */
+    margin-bottom: 1.5rem;
+}
+
+.input-group:focus-within .input-group-text {
+    background-color: #003366;
+    color: #fff;
+}
+
+    .entrada-bg {
+        background-color: #e9f9ec !important; /* Verde suave */
+        border: 2px solid #198754; /* Borde verde */
+    }
+
+    .salida-bg {
+        background-color: #fcebea !important; /* Rojo suave */
+        border: 2px solid #dc3545; /* Borde rojo */
+    }
+
+</style>
+
+
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -36,6 +159,10 @@
                         <i class="fas fa-check-circle me-2"></i>Seleccionar
                     </button>
 
+                 
+
+                </div>
+
                 </div>
             </div>
         </div>
@@ -57,65 +184,116 @@
     </ul>
     <div class="tab-content" id="myTabContent">
         <div class="tab-pane fade show active" id="reconocimiento" role="tabpanel">
-            <div class="card shadow">
-                <div class="card-body">
-                    <h2 class="card-title">Verificación del rostro por medio de la cámara</h2>
+          <div class="card shadow recognition-card">
+    <div class="card-body">
+        <h2 class="card-title text-center">Verificación del rostro por medio de la cámara</h2>
 
-                    <!-- Selector de tipo de registro -->
-                    <div class="mb-3">
-                        <label for="tipoRegistro" class="form-label">Tipo de Registro:</label>
-                        <select id="tipoRegistro" class="form-select" required>
-                            <option value="">-- Seleccionar --</option>
-                            <option value="entrada">Entrada</option>
-                            <option value="salida">Salida</option>
-                        </select>
-                    </div>
-
-                    <div id="camera" class="mb-3">
-                        <video id="video" class="w-100" autoplay muted></video>
-                    </div>
-                    <button id="start-camera" class="btn btn-primary w-100 mb-3">Activar Cámara</button>
-                    <div id="recognition-result" class="alert alert-info" style="display: none;"></div>
-                </div>
+        <!-- Selector de tipo de registro -->
+        <div class="mb-3">
+            <label for="tipoRegistro" class="form-label">Tipo de Registro:</label>
+            <select id="tipoRegistro" class="form-select" required>
+                <option value="">-- Seleccionar --</option>
+                <option value="entrada">Entrada</option>
+                <option value="salida">Salida</option>
+            </select>
+            <!-- Icono dinámico según el tipo de registro -->
+            <div id="icono-puerta" class="text-center fs-1 my-3" style="display: none;">
+                <i id="puerta-icono" class="fa-solid"></i>
             </div>
+        </div>
+
+        <div id="camera" class="mb-3">
+            <video id="video" class="w-100" autoplay muted style="border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);"></video>
+        </div>
+
+        <button id="start-camera" class="btn btn-primary w-100 mb-3">
+            <i class="fas fa-video me-2"></i>Activar Cámara
+        </button>
+
+        <button id="stop-camera" class="btn btn-danger w-100 mb-3">
+            <i class="fas fa-video-slash me-2"></i>Desactivar Cámara
+        </button>
+
+
+        <div id="recognition-result" class="alert alert-info" style="display: none;"></div>
+    </div>
+</div>
+  
         </div>
 
         <div class="tab-pane fade" id="registro" role="tabpanel">
             <div class="card shadow">
                 <div class="card-body">
                     <h2 class="card-title">Agregar Usuario</h2>
-                    <form id="user-form" enctype="multipart/form-data">
+                        <form id="user-form" class="needs-validation" novalidate enctype="multipart/form-data">
 
+                        <!-- Área -->
                         <div class="mb-3">
                             <label for="areaSelect" class="form-label">Área:</label>
+                            <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-building"></i></span>
                             <select id="areaSelect" name="areaId" class="form-select" required>
                                 <option value="">-- Seleccionar Área --</option>
                             </select>
+                            <div class="invalid-feedback">Seleccione un área.</div>
+                            </div>
                         </div>
 
+                        <!-- Nombre -->
                         <div class="mb-3">
                             <label for="name" class="form-label">Nombre:</label>
+                            <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-user"></i></span>
                             <input type="text" id="name" name="name" class="form-control" required>
+                            <div class="invalid-feedback">Este campo es obligatorio.</div>
+                            </div>
                         </div>
+
+                        <!-- DPI -->
                         <div class="mb-3">
                             <label for="cedula" class="form-label">DPI:</label>
-                            <input type="text" id="cedula" name="cedula" class="form-control" required>
+                            <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-id-card"></i></span>
+                            <input type="text" id="cedula" name="cedula" class="form-control"
+                                    maxlength="13" inputmode="numeric" pattern="\d{13}" required
+                                    placeholder="Ej: 1234567890123" title="Ingrese los 13 dígitos del DPI">
+                            <div class="invalid-feedback">Ingrese un DPI válido de 13 dígitos.</div>
+                            </div>
                         </div>
+
+                        <!-- Rol -->
                         <div class="mb-3">
                             <label for="cargo" class="form-label">Rol:</label>
+                            <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-user-tie"></i></span>
                             <input type="text" id="cargo" name="cargo" class="form-control" required>
+                            <div class="invalid-feedback">Este campo es obligatorio.</div>
+                            </div>
                         </div>
+
+                        <!-- Foto -->
                         <div class="mb-3">
                             <label for="photo" class="form-label">Foto:</label>
+                            <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-camera"></i></span>
                             <input type="file" id="photo" name="photo" class="form-control" accept="image/*" required>
+                            <div class="invalid-feedback">Seleccione una imagen de rostro.</div>
+                            </div>
+
                             <button type="button" class="btn btn-secondary mt-2" id="take-photo-btn">
-                                <i class="fas fa-camera"></i> Tomar Foto con Cámara
+                            <i class="fas fa-camera"></i> Tomar Foto con Cámara
                             </button>
+
                             <video id="camera-preview" autoplay muted style="display: none; width: 100%; max-height: 200px; margin-top: 10px; border-radius: 6px;"></video>
                             <img id="preview-image" src="#" class="img-thumbnail mt-2" style="display:none; max-width: 200px;">
                         </div>
-                        <button type="submit" id="submit-button" class="btn btn-success w-100">Agregar Usuario</button>
-                    </form>
+
+                        <button type="submit" id="submit-button" class="btn btn-success w-100">
+                            <i class="fas fa-user-plus me-2"></i>Agregar Usuario
+                        </button>
+
+                        </form>
+
                     <p id="loading-message" class="mt-3" style="display: none;">Agregando usuario, por favor espera...</p>
                 </div>
             </div>
@@ -133,7 +311,7 @@
 <script defer src="https://cdn.jsdelivr.net/npm/face-api.js/dist/face-api.min.js"></script>
 
 <script>
-    const DEVICE_CODE = '01';
+    const DEVICE_CODE = '02';
 </script>
 
 <script defer src="script.js"></script>
@@ -169,5 +347,198 @@
         }, 1000);
     });
 </script>
+<script>
+    document.getElementById('selectEmpresa').addEventListener('click', () => {
+        const overlay = document.getElementById('loadingEmpresa');
+        const btn = document.getElementById('selectEmpresa');
+
+        overlay.style.display = 'flex';
+        btn.disabled = true;
+
+        setTimeout(() => {
+            overlay.style.display = 'none';
+            btn.disabled = false;
+
+            document.getElementById('empresa-selection').style.display = 'none';
+            const mainContent = document.getElementById('main-content');
+            mainContent.style.display = 'block';
+            setTimeout(() => mainContent.classList.add('show'), 10);
+            new bootstrap.Toast(document.getElementById('empresaToast')).show();
+        }, 2000);
+    });
+</script>
+
+<div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 2000;">
+  <div id="empresaToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body">✅ Empresa seleccionada correctamente</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+   <!-- Spinner profesional optimizado -->
+<div id="loadingEmpresa" class="spinner-overlay" style="display: none;">
+    <div class="spinner-content">
+    <div class="spinner-border text-light" role="status" style="width: 3rem; height: 3rem;"></div>
+        <p class="mt-3 fs-5">Cargando, por favor espera...</p>
+        </div>
+</div>
+
+<script>
+  document.getElementById('cedula').addEventListener('input', function () {
+    // Reemplaza todo lo que no sea dígito
+    this.value = this.value.replace(/\D/g, '').slice(0, 13);
+  });
+</script>
+<script>
+  // Activar validación Bootstrap al enviar el formulario
+  (() => {
+    'use strict';
+    const forms = document.querySelectorAll('.needs-validation');
+    Array.from(forms).forEach(form => {
+      form.addEventListener('submit', event => {
+        if (!form.checkValidity()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        form.classList.add('was-validated');
+      }, false);
+    });
+  })();
+</script>
+
+<script>
+  const tipoRegistro = document.getElementById('tipoRegistro');
+  const iconoPuerta = document.getElementById('icono-puerta');
+  const puertaIcono = document.getElementById('puerta-icono');
+
+  tipoRegistro.addEventListener('change', () => {
+    if (tipoRegistro.value === "entrada") {
+      iconoPuerta.style.display = 'block';
+      puertaIcono.className = 'fa-solid fa-door-open text-success';
+    } else if (tipoRegistro.value === "salida") {
+      iconoPuerta.style.display = 'block';
+      puertaIcono.className = 'fa-solid fa-door-closed text-danger';
+    } else {
+      iconoPuerta.style.display = 'none';
+    }
+  });
+</script>
+<script>
+  function mostrarPuertaReconocida(tipo) {
+    const iconoPuerta = document.getElementById('icono-puerta');
+    const puertaIcono = document.getElementById('puerta-icono');
+
+    if (tipo === "entrada") {
+      puertaIcono.className = 'fa-solid fa-door-open text-success';
+    } else if (tipo === "salida") {
+      puertaIcono.className = 'fa-solid fa-door-closed text-danger';
+    }
+    iconoPuerta.style.display = 'block';
+  }
+
+  // Simula reconocimiento exitoso
+  function mostrarAccesoReconocido(nombre) {
+    const tipo = document.getElementById('tipoRegistro').value;
+    const resultado = document.getElementById('recognition-result');
+
+    resultado.className = 'alert alert-success';
+    resultado.innerText = `✅ Acceso concedido a ${nombre}`;
+    resultado.style.display = 'block';
+
+    mostrarPuertaReconocida(tipo);
+    mostrarPuertaVisual(tipo);      // animación tipo flash
+  }
+
+  function mostrarPuertaReconocida(tipo) {
+  const iconoPuerta = document.getElementById('icono-puerta');
+  const puertaIcono = document.getElementById('puerta-icono');
+
+  if (tipo === "entrada") {
+    puertaIcono.className = 'fa-solid fa-door-open text-success';
+  } else if (tipo === "salida") {
+    puertaIcono.className = 'fa-solid fa-door-closed text-danger';
+  }
+  iconoPuerta.style.display = 'block';
+}
+
+</script>
+
+<script>
+  const tipoRegistroInput = document.getElementById('tipoRegistro');
+  const recognitionCard = document.querySelector('.recognition-card');
+
+  tipoRegistroInput.addEventListener('change', () => {
+    recognitionCard.classList.remove('entrada-bg', 'salida-bg');
+
+    if (tipoRegistroInput.value === "entrada") {
+      recognitionCard.classList.add('entrada-bg');
+    } else if (tipoRegistroInput.value === "salida") {
+      recognitionCard.classList.add('salida-bg');
+    }
+  });
+</script>
+
+
+</script>
+
+<script>
+  document.getElementById('start-camera').addEventListener('click', async () => {
+    try {
+      // 🎤 Desbloquear AudioContext si aún no está iniciado
+      if (typeof window.audioContextUnlocked === 'undefined') {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const dummy = ctx.createOscillator();
+        dummy.connect(ctx.destination);
+        dummy.start();
+        dummy.stop();
+        window.audioContextUnlocked = true;
+      }
+
+      // Activar cámara
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const video = document.getElementById('video');
+      video.srcObject = stream;
+    } catch (err) {
+      alert('Error al activar la cámara: ' + err.message);
+    }
+  });
+</script>
+
+<script>
+  let currentStream = null;
+
+  document.getElementById('start-camera').addEventListener('click', async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const video = document.getElementById('video');
+      video.srcObject = stream;
+      currentStream = stream;
+    } catch (err) {
+      alert('Error al activar la cámara: ' + err.message);
+    }
+  });
+
+  document.getElementById('stop-camera').addEventListener('click', () => {
+    const video = document.getElementById('video');
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+      video.srcObject = null;
+      currentStream = null;
+    }
+
+   // ✅ Eliminar todos los canvas generados por face-api.js
+    document.querySelectorAll('canvas').forEach(canvas => canvas.remove());
+
+
+    // 🔴 Ocultar resultado de reconocimiento (si está visible)
+    const result = document.getElementById('recognition-result');
+    if (result) {
+      result.style.display = 'none';
+    }
+  });
+</script>
+
+
 </body>
 </html>

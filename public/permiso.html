@@ -138,9 +138,12 @@
 
 <script>
   // ① Variables globales
-  const DEVICE_CODE     = '01';
-  let   CURRENT_USER_ID = null;
-  let   DEFAULT_USERS   = [];   // ← Aquí guardamos los IDs a ocultar
+ // const DEVICE_CODE     = '02';
+  //let   CURRENT_USER_ID = null;
+  //let   DEFAULT_USERS   = [];   // ← Aquí guardamos los IDs a ocultar
+  const urlParams = new URLSearchParams(window.location.search);
+  const DEVICE_CODE = urlParams.get('device') || '02';
+
 
   // ② Login
   document.getElementById('login-form').addEventListener('submit', async e => {
